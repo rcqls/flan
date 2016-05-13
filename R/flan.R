@@ -12,7 +12,7 @@
     # death:  death probability. Must be smaller than 0.5.
     # method:  estimation method as a character string: one of ML (default), P0, or GF.
     # winsor:  winsorization parameter: positive integer. Only used when method is ML or when method is P0 and fitness is NULL.
-    # model:  statistical lifetime model as a character string: one of LD (default) for Luria-Delbrück model with exponential lifetimes, or H for Haldane model with constant lifetimes.
+    # model:  statistical lifetime model as a character string: one of LD (default) for Luria-Delbruck model with exponential lifetimes, or H for Haldane model with constant lifetimes.
     # Assumptions for the estimation
     #   - fitness (if given)
     #   - death probability
@@ -29,7 +29,7 @@
     #   - Standard deviation of alpha, (or pi) and rho if non given
 
 mutestim <- function(mc,fn=NULL,mfn=NULL,cvfn=NULL,                 # user's data
-                  fitness=NULL,death=0,                # user's parameters
+                  fitness=NULL,death=0.,                # user's parameters
                   method=c("ML","GF","P0"),winsor=512, # estimation method
                   model=c("LD","H"))                   # clone growth model
                   {
@@ -136,7 +136,7 @@ mutestim <- function(mc,fn=NULL,mfn=NULL,cvfn=NULL,                 # user's dat
 
 
 flan.test <- function(mc,fn=NULL,mfn=NULL,cvfn=NULL,                      # user's data
-               fitness=NULL,death=0,                         # user's parameters
+               fitness=NULL,death=0.,                         # user's parameters
                mutations0=1,mutprob0=NULL,fitness0=1,       # null hypotheses
                conf.level=0.95,                              # confidence level
                alternative=c("two.sided","less","greater"),  # alternative
@@ -462,7 +462,7 @@ flan.test <- function(mc,fn=NULL,mfn=NULL,cvfn=NULL,                      # user
     #
     #   Returns the two samples mcs and fn
     #
-rflan <- function(n,mutations=1,mutprob=NULL,fitness=1,death=0,
+rflan <- function(n,mutations=1,mutprob=NULL,fitness=1,death=0.,
         dist=list(name="lnorm",meanlog=-0.3795851,sdlog=0.3016223),
         mfn=1e9,cvfn=0) {
 
@@ -518,7 +518,7 @@ rflan <- function(n,mutations=1,mutprob=NULL,fitness=1,death=0,
 			#   )
 		  # )
 
-    if(dist$name == "lnorm" | dist$name == "gamma")  dist <- adjust.rate(dist,death)
+    if(dist$name == "lnorm" | dist$name == "gamma")  dist <- adjust.rate(dist,1,death)
     flan.sim <- new(FlanSim,list(
       mutations=mutations,
       fitness=fitness,
@@ -549,7 +549,7 @@ rflan <- function(n,mutations=1,mutprob=NULL,fitness=1,death=0,
   #   death : death probability
   #   model : lifetimes distribution model : exponentialy distributed lifetimes ("LD") or constant lifetimes ("H")
 
-qflan <- function(p,mutations=1,fitness=1,death=0,model=c("LD","H"),lower.tail=TRUE){
+qflan <- function(p,mutations=1,fitness=1,death=0.,model=c("LD","H"),lower.tail=TRUE){
 
   if((sum(p < 0)+sum(p > 1)) != 0){
     stop("'p' must be a vector of positive and <= 1 numbers")
@@ -571,23 +571,23 @@ qflan <- function(p,mutations=1,fitness=1,death=0,model=c("LD","H"),lower.tail=T
   m <- 100
   P <- pflan(0:m,mutations,fitness,death,model,lower.tail)
   sapply(p,function(pp){
-    if(pp == 1) return(Inf)
-    if (lower.tail & pp <= P[1]) return(0)
-    if (!lower.tail & pp >= P[1]) return(0)
+    if(pp == 1) Inf
+    if (lower.tail & pp <= P[1]) 0
+    if (!lower.tail & pp >= P[1]) 0
     else {
       k <- if(lower.tail) max(which(P<pp)) else max(which(P>pp))          # quantile if in the actual table
       while (k>=m){                   # if p not yet in the table
 	m2 <- 2*m                       # double the table
 	P2 <- pflan(m:m2,mutations,fitness,death,model,lower.tail)      # truncated distribution function
-	if (lower.tail & pp <= P2[1]) return(k)
-	if (!lower.tail & pp >= P2[1]) return(k)
+	if (lower.tail & pp <= P2[1]) k
+	if (!lower.tail & pp >= P2[1]) k
 	else {
 	  k <- k-1+if(lower.tail) max(which(P2<pp)) else max(which(P2>pp))           # quantile if in the table
 	  m <- m2
 	}
       }                              # end while
     }                                  # end if
-    return(k)
+    k
   })
 
 }
@@ -599,7 +599,7 @@ qflan <- function(p,mutations=1,fitness=1,death=0,model=c("LD","H"),lower.tail=T
   #   model : lifetimes distribution model : exponentialy distributed lifetimes ("LD") or constant lifetimes ("H")
 
 
-pflan <- function(m,mutations=1,fitness=1,death=0,model=c("LD","H"),lower.tail=TRUE){
+pflan <- function(m,mutations=1,fitness=1,death=0.,model=c("LD","H"),lower.tail=TRUE){
 
   if(sum(m < 0) > 0 | sum(trunc(m) != m) > 0){
     stop("'m' must be a vector of positive integers")
@@ -643,7 +643,7 @@ pflan <- function(m,mutations=1,fitness=1,death=0,model=c("LD","H"),lower.tail=T
   #   model : lifetimes distribution model : exponentialy distributed lifetimes ("LD") or constant lifetimes ("H")
 
 
-dflan <- function(m,mutations=1,fitness=1,death=0,model=c("LD","H")){
+dflan <- function(m,mutations=1,fitness=1,death=0.,model=c("LD","H")){
 
   if(sum(m < 0) > 0 | sum(trunc(m) != m) > 0){
     stop("'m' must be a vector of positive integers")
@@ -683,38 +683,46 @@ dflan <- function(m,mutations=1,fitness=1,death=0,model=c("LD","H")){
 
 
 ## Sampling
-adjust.rate <- function(dist,delta=0){
-#   rescales the parameter(s) of distribution dist to unit growh rate.
+adjust.rate <- function(dist,fitness=1,death=0.){
+#   rescales the parameter(s) of distribution dist to obtain growh rate equal to fitness.
 #   The distribution is given and returned as a list of a character chain 
 #   followed by the list of parameters. 
 
   adist <- dist				# adjusted distribution
-  m <- 2*(1-delta)			# mean offspring number
+  m <- 2*(1-death)			# mean offspring number
   switch(dist[[1]],
+    dirac={                              # Dirac distribution
+	adist$location <- log(m)/fitness      # new location parameter
+	return(adist)
+	  },                              # end Dirac distribution
+    exp={                                # Exponential distribution
+	adist$rate <- fitness/(m-1)
+	return(adist)
+	  },   
     gamma={				# Gamma distribution
       a <- dist$shape			# according to the shape parameter
-      adist$scale <- (m^(1/a)-1)	# adjust scale parameter 
+      adist$scale <- (m^(1/a)-1)/fitness	# adjust scale parameter 
     },
     lnorm={					# Log-normal distribution
-#       s <- growth.rate(dist,delta)		# according to the rate
+#       s <- growth.rate(dist,death)		# according to the rate
       a <- dist$sdlog
       l <- dist$meanlog
       lap <- function(s){               # Laplace transform
 	f <- function(x){exp(-(s*exp(a*x*sqrt(2)+l)+x^2))}
 
 	I <- {integrate(f,
-	      lower=-Inf,upper=Inf,rel.tol=.flantol)}      # integrate from - to + infinity
+	      lower=-Inf,upper=Inf,rel.tol=.flantol,subdivisions=.flansubd)}      # integrate from - to + infinity
 	
 	I <- I$value                      # get the value
   	I <- I/sqrt(pi)			# rescale
-        return(I-1/m)                     # return shifted Laplace transform
+        I-1/m                     # return shifted Laplace transform
       }
       lwb <- 1                          # lower bound of search interval
       while(lap(lwb)<0){lwb<-lwb/2}     # adjust lower bound
       upb <- 1                          # upperbound of search interval
       while(lap(upb)>0){upb<-upb+1}     # adjust upperbound
       s <- uniroot(lap,c(lwb,upb))$root       # find root of lap 
-      adist$meanlog <- log(s)+adist$meanlog	# adjust scale parameter 
+      adist$meanlog <- log(s/fitness)+adist$meanlog	# adjust scale parameter 
      
     }
   )
@@ -724,37 +732,44 @@ adjust.rate <- function(dist,delta=0){
 ## Estimation
 
 	      #//////////////////////////////////ML method//////////////////////////////////#
-MutationMLOptimization <- function(mc,mfn=NULL,cvfn=NULL,model=c("LD","H"),fitness=1,death=0,winsor=512){
+	      
+# Returns the ML estimate of mean number of mutation for a sample mc, given the fitness and death
+# If mfn or cvfn are non-empty, returns the estimate of mutation probability instead of the mean number, after decreasing the bias
+# induced if cvfn > 0
+MutationMLOptimization <- function(mc,mfn=NULL,cvfn=NULL,model=c("LD","H"),fitness=1,death=0.,winsor=512){
 
   if(missing(model)) model <- "LD"
   model <- match.arg(model)
 
+  
+  # Initialization
+  a.est <- MutationGFEstimation(mc,fitness=fitness,death=death,model=model)$mutations
+  
+  # Winsorization
   if(max(mc) > winsor) mc[mc > winsor] = winsor
   
   
-  dC <- dclone(0:max(mc),fitness,death,model)
+  dC <- dclone(m=0:max(mc),fitness=fitness,death=death,model=model)
   
   ll <- function(a){
-    p <- log(deduce.dflan(mc,a,fitness,death,model,dC))
+    p <- log(deduce.dflan(m=mc,mutations=a,fitness=fitness,death=death,model=model,clone=dC))
     -sum(p)
   }
   # gradient of log-likelihood of the sample
   dll <- function(a){
-    p <- deduce.dflanda(mc,a,fitness,death,model,dC)
+    p <- deduce.dflanda(m=mc,mutations=a,fitness=fitness,death=death,model=model,clone=dC)
     res <- p$dQ_da/p$Q
     -sum(res)
   }
   
-#   a.est <- 1
-  a.est <- MutationGFEstimation(mc,fitness=fitness,death=death,model=model)$mutations
   
-  lower = 0.05*a.est
-  upper = 20*a.est
+  lower = 0.1*a.est
+  upper = 10*a.est
   
   a.est <- lbfgsb3(prm=a.est,fn=ll,gr=dll,lower = lower,upper=upper,control=list(trace=0,iprint=-1))$prm
 #   a.est <- optimx(par=a.est,fn=ll,gr=dll,lower = lower,upper=upper)$par_1
   
-  dldd <- deduce.dflanda(mc,a.est,fitness,death,model,clone=dC)
+  dldd <- deduce.dflanda(m=mc,mutations=a.est,fitness=fitness,death=death,model=model,clone=dC)
   
   I <- sum((dldd$dQ_da)^2/(dldd$Q)^2)
   
@@ -778,23 +793,27 @@ MutationMLOptimization <- function(mc,mfn=NULL,cvfn=NULL,model=c("LD","H"),fitne
   
 }
 
-
-MutationProbabilityMLOptimization <- function(mc,fn,model=c("LD","H"),fitness=1,death=0,winsor=512){
+# Returns the ML estimate of mutation probability for a sample of couple (mc,fn), given the fitness and death
+MutationProbabilityMLOptimization <- function(mc,fn,model=c("LD","H"),fitness=1,death=0.,winsor=512){
 
   if(missing(model)) model <- "LD"
-  
   model <- match.arg(model)
-
-  if(max(mc) > winsor) mc[mc > winsor] = winsor
+  
   mfn <- mean(fn)
   cvfn <- sd(fn)/mfn
   
-  dC <- dclone(0:max(mc),fitness,death,model)
+  # Initialization
+  pm.est <- MutationGFEstimation(mc=mc,mfn=mfn,cvfn=cvfn,fitness=fitness,death=death,model=model)$mutprob*mfn
+
+  # Winsorization
+  if(max(mc) > winsor) mc[mc > winsor] = winsor
+  
+  dC <- dclone(m=0:max(mc),fitness=fitness,death=death,model=model)
   
   ll <- function(pm){
     p <- mapply(function(x,y){
       y <- y/mfn
-      log(deduce.dflan(x,pm*y,fitness,death,model,clone=dC))
+      log(deduce.dflan(m=x,mutations=pm*y,fitness=fitness,death=death,model=model,clone=dC))
     },mc,fn)
     -sum(p)
   }
@@ -803,24 +822,20 @@ MutationProbabilityMLOptimization <- function(mc,fn,model=c("LD","H"),fitness=1,
   dll <- function(pm){
     res <- mapply(function(x,y){
       y <- y/mfn
-      p<-deduce.dflanda(mc,pm*y,fitness,death,model,clone=dC)
-      
+      p<-deduce.dflanda(m=x,mutations=pm*y,fitness=fitness,death=death,model=model,clone=dC)
       p$dQ_da*y/p$Q
     },mc,fn)
     -sum(res)
   }
   
-  pm.est <- MutationGFEstimation(mc,mfn=mfn,cvfn=cvfn,fitness=fitness,death=death,model=model)$mutprob*mfn
-  
-  
-  lower = 0.05*pm.est
-  upper = 20*pm.est
+  lower = 0.1*pm.est
+  upper = 10*pm.est
   
   pm.est <- lbfgsb3(prm=pm.est,fn=ll,gr=dll,lower = lower,upper=upper,control=list(trace=0,iprint=-1))$prm/mfn
 #   pm.est <- optimx(par=pm.est,fn=ll,gr=dll,lower = lower,upper=upper)$ar_1/mfn
   
   dldd <- mapply(function(x,y){
-	    deduce.dflanda(x,pm.est*y,fitness,death,model,clone=dC)
+	    deduce.dflanda(m=x,mutations=pm.est*y,fitness=fitness,death=death,model=model,clone=dC)
 	  },mc,fn)
   
   I <- sum((unlist(dldd[2,])*fn)^2/unlist(dldd[1,])^2)            # Fisher information
@@ -831,17 +846,26 @@ MutationProbabilityMLOptimization <- function(mc,fn,model=c("LD","H"),fitness=1,
 
 }
 
-MutationFitnessMLOptimization <- function(mc,mfn=NULL,cvfn=NULL,model=c("LD","H"),death=0,winsor=512){
+# Returns the ML estimates of mean number of mutation and fitness for a sample mc, given the death
+# If mfn or cvfn are non-empty, returns the estimate of mutation probability instead of the mean number, after decreasing the bias
+# induced if cvfn > 0
+MutationFitnessMLOptimization <- function(mc,mfn=NULL,cvfn=NULL,model=c("LD","H"),death=0.,winsor=512){
 
   if(missing(model)) model <- "LD"
   model <- match.arg(model)
+  
+  # Initialization
+  est <- MutationFitnessGFEstimation(mc=mc,death=death,model=model)
+  if(!est$succeeds) warning("Initialization of 'fitness' with 'GF'-method has failed.")
+  a.est <- est$mutations ; r.est <- est$fitness
 
+  # Winsorization
   if(max(mc) > winsor) mc[mc > winsor] = winsor
   
   ll <- function(param){
     a <- param[1]
     r <- param[2]
-    p <- log(dflan(mc,a,r,death,model))
+    p <- log(dflan(m=mc,mutations=a,fitness=r,death=death,model=model))
     -sum(p)
   }
   
@@ -849,26 +873,26 @@ MutationFitnessMLOptimization <- function(mc,mfn=NULL,cvfn=NULL,model=c("LD","H"
   dll <- function(param){
     a = param[1]
     r = param[2]
-    p <- dflan.grad(mc,a,r,death,model,dalpha=TRUE,drho=TRUE)
-    
-    res <- cbind(p$dQ_da,p$dQ_dr)/p$Q
-    -apply(res,2,sum)
+#     cat("alpha =",a,"| rho =",r,"\n")
+    p <- dflan.grad(m=mc,mutations=a,fitness=r,death=death,model=model,dalpha=TRUE,drho=TRUE)
+    res <- rbind(p$dQ_da,p$dQ_dr)/p$Q
+    -apply(res,1,sum)
   }
   
+  lower = 0.1*c(a.est,r.est)
+  upper = 10*c(a.est,r.est)
   
-  est <- MutationFitnessGFEstimation(mc,death=death,model=model)
-  if(!est$succeeds) warning("Initialization of 'fitness' with 'GF'-method has failed.")
-  a.est <- est$mutations ; r.est <- est$fitness
-  
-  lower = 0.05*c(a.est,r.est)
-  upper = 20*c(a.est,r.est)
+  if(!est$succeeds) {
+    lower[2] <- 10*r.est ; 
+    upper[2] <- 500*r.est
+  }
   
   est <- lbfgsb3(prm=c(a.est,r.est),fn=ll,gr=dll,lower = lower,upper=upper,control=list(trace=0,iprint=-1))$prm
 #   est <- optimx(par=c(a.est,r.est),fn=ll,gr=dll,lower = lower,upper=upper,method="L-BFGS-B")  
   a.est = est[1]					# Update alpha estimate
   r.est = est[2]					# Update rho estimate
   
-  dldd <- dflan.grad(mc,a.est,r.est,death,model,dalpha=TRUE,drho=TRUE)
+  dldd <- dflan.grad(m=mc,mutations=a.est,fitness=r.est,death=death,model=model,dalpha=TRUE,drho=TRUE)
   
   p2 <- (dldd$Q)^2
   dpa <- dldd$dQ_da
@@ -887,12 +911,12 @@ MutationFitnessMLOptimization <- function(mc,mfn=NULL,cvfn=NULL,model=c("LD","H"
       z4=.tunings$z4
       Mutmodel <- new(FlanMutMod,list(
 		mutations=a.est,
-		fitness=fitness,
+		fitness=r.est,
 		death=death,
 		model=model,
 		lt=TRUE
 	      ))
-      pm.est <- unbias.mutprob(sda,z4,mfn,cvfn)
+      pm.est <- Mutmodel$unbias.mutprob(sda,z4,mfn,cvfn)
     } else pm.est <- list(mutprob=a.est/mfn,sd.mutprob=sda/mfn)
     
     c(pm.est,fitness=r.est,sd.fitness=sdr)
@@ -901,8 +925,9 @@ MutationFitnessMLOptimization <- function(mc,mfn=NULL,cvfn=NULL,model=c("LD","H"
 
 }
 
-MutationProbabilityFitnessMLOptimization <- function(mc,fn,model=c("LD","H"),death=0,winsor=512){
-  if(max(mc) > winsor) mc[mc > winsor] = winsor
+
+# Returns the ML estimates of mutation probability and fitness for a sample of couple (mc,fn), given the death
+MutationProbabilityFitnessMLOptimization <- function(mc,fn,model=c("LD","H"),death=0.,winsor=512){
   
   if(missing(model)) model <- "LD"
   model <- match.arg(model)
@@ -910,13 +935,21 @@ MutationProbabilityFitnessMLOptimization <- function(mc,fn,model=c("LD","H"),dea
   mfn <- mean(fn)
   cvfn <- sd(fn)/mfn
   
+  
+  # Initialization
+  est <- MutationFitnessGFEstimation(mc,mfn=mfn,cvfn=cvfn,death=death,model=model)
+  if(!est$succeeds) warning("Initialization of 'fitness' with 'GF'-method has failed.") 
+  pm.est <- est$mutprob*mfn ; r.est <- est$fitness
+  
+  # Winsorization
+  if(max(mc) > winsor) mc[mc > winsor] = winsor
+  
   ll <- function(param){
     pm <- param[1]
     r <- param[2]
     p <- mapply(function(x,y){
       y <- y/mfn
-#       log(dflan(x,pm*y,r,death,model))
-      dflan(x,pm*y,r,death,model)
+      log(dflan(m=x,mutations=pm*y,fitness=r,death=death,model=model))
     },mc,fn)
     -sum(p)
   }
@@ -927,19 +960,20 @@ MutationProbabilityFitnessMLOptimization <- function(mc,fn,model=c("LD","H"),dea
     r = param[2]
     res <- mapply(function(x,y){
       y <- y/mfn
-      p<-dflan.grad(mc,pm*y,r,death,model,dalpha=TRUE,drho=FALSE)
-      p$dQ_da*y/p$Q
+      p<-dflan.grad(m=x,mutations=pm*y,fitness=r,death=death,model=model,dalpha=TRUE,drho=TRUE)
+      rbind(p$dQ_da*y,p$dQ_dr)/p$Q
     },mc,fn)
     -apply(res,1,sum)
   }
   
-  est <- MutationFitnessGFEstimation(mc,mfn=mfn,cvfn=cvfn,death=death,model=model)
-  if(!est$succeeds) warning("Initialization of 'fitness' with 'GF'-method has failed.")
-  pm.est <- est$mutprob*mfn ; r.est <- est$fitness
   
+  lower = 0.1*c(pm.est,r.est)
+  upper = 10*c(pm.est,r.est)
   
-  lower = 0.05*c(pm.est,r.est)
-  upper = 20*c(pm.est,r.est)
+  if(!est$succeeds) {
+    lower[2] <- 10*r.est ; 
+    upper[2] <- 500*r.est
+  }
   
   est <- lbfgsb3(prm=c(pm.est,r.est),fn=ll,gr=dll,lower = lower,upper=upper,control=list(trace=0,iprint=-1))$prm
   
@@ -947,7 +981,7 @@ MutationProbabilityFitnessMLOptimization <- function(mc,fn,model=c("LD","H"),dea
   r.est = est[2]					# Update rho estimate
   
   dldd <- mapply(function(x,y){
-	    dflan.grad(x,pm.est*y,r.est,death,model,dalpha=TRUE,drho=TRUE)
+	    dflan.grad(m=x,mutations=pm.est*y,fitness=r.est,death=death,model=model,dalpha=TRUE,drho=TRUE)
 	  },mc,fn)
   
   p2 <- (unlist(dldd[1,]))^2
@@ -969,7 +1003,8 @@ MutationProbabilityFitnessMLOptimization <- function(mc,fn,model=c("LD","H"),dea
 
 	      #//////////////////////////////////P0 method//////////////////////////////////#
 
-MutationsNumberP0Estimation <- function(mc,death=0){
+# Returns the P0 estimate of mean number of mutations for a sample of couple mc, given the death
+MutationsNumberP0Estimation <- function(mc,death=0.){
 
 # Return the estimate of alpha for a sample mc
 # by p0-method under cell deaths with probability delta
@@ -995,7 +1030,10 @@ MutationsNumberP0Estimation <- function(mc,death=0){
 }
 
 
-MutationP0Estimation <- function(mc,mfn=NULL,cvfn=NULL,death=0){
+# Returns the P0 estimate of mean number of mutations for a sample of couple mc, given the death
+# If mfn or cvfn are non-empty, returns the estimate of the mutation probability instaed of the mean number
+# after decreasing the induced bias if cvfn > 0
+MutationP0Estimation <- function(mc,mfn=NULL,cvfn=NULL,death=0.){
 
 # Return the estimate of alpha for a sample mc
 # by p0-method under cell deaths with probability delta
@@ -1020,8 +1058,10 @@ MutationP0Estimation <- function(mc,mfn=NULL,cvfn=NULL,death=0){
   } else list(mutations=a,sd.mutations=sda)  
 }
 
-
-MutationFitnessP0Estimation <- function(mc,fn=NULL,mfn=NULL,cvfn=NULL,model=c("LD","H"),death=0,winsor=512){
+# Returns the P0 estimate of mean number of mutations and fitness for a sample of couple mc,given the death
+# If mfn or cvfn are non-empty, returns the estimate of the mutation probability instaed of the mean number
+# after decreasing the induced bias if cvfn > 0
+MutationFitnessP0Estimation <- function(mc,fn=NULL,mfn=NULL,cvfn=NULL,model=c("LD","H"),death=0.,winsor=512){
 
   if(missing(model)) model <- "LD"
   model <- match.arg(model)
@@ -1048,18 +1088,27 @@ MutationFitnessP0Estimation <- function(mc,fn=NULL,mfn=NULL,cvfn=NULL,model=c("L
     output <- list(mutprob=pm,sd.mutprob=sdpm)
   } else output <- list(mutations=a,sd.mutations=sda)
   
-  if(!is.null(fn)) r <- FitnessP0Optimization(mc,fn,model,mut=pm,death,winsor)
-  else r <- FitnessP0Optimization(mc,fn,model,mut=a,death,winsor)
+  if(!is.null(fn)) r <- FitnessP0Optimization(mc=mc,fn=fn,model=model,mut=pm,death=death,winsor=winsor)
+  else r <- FitnessP0Optimization(mc=mc,fn=fn,model=model,mut=a,death=death,winsor=winsor)
     
   c(output,fitness=r$fitness,sd.fitness=r$sd.fitness)  
   
 }
 
-FitnessP0Optimization <- function(mc,fn=NULL,model=c("LD","H"),mut,death=0,winsor=512){
+
+# Returns the ML estimate of fitness for a sample of couple mc, given the mean number of mutations (or mutation probability) and death
+# If fn is non-empty, 
+FitnessP0Optimization <- function(mc,fn=NULL,model=c("LD","H"),mut,death=0.,winsor=512){
 
   if(missing(model)) model <- "LD"
   model <- match.arg(model)
 
+  # Initialization
+  est <- FitnessGFEstimation(mc,death,model)
+  if(!est$succeeds) warning("Initialization of 'fitness' with 'GF'-method has failed.")
+  r.est <- est$fitness
+  
+  # Winsorization
   if(max(mc) > winsor){ mc[which(mc>winsor)] = winsor}
   
   
@@ -1067,13 +1116,13 @@ FitnessP0Optimization <- function(mc,fn=NULL,model=c("LD","H"),mut,death=0,winso
     if(missing(mut)) mut <- 1
     
     ll <- function(r){
-      p <- log(dflan(mc,mut,r,death,model))
+      p <- log(dflan(m=mc,mutations=mut,fitness=r,death=death,model=model))
       -sum(p)
     }
     
     # gradient of log-likelihood of the sample
     dll <- function(r){
-      p <- dflan.grad(mc,mut,r,death,model,dalpha=FALSE,drho=TRUE)
+      p <- dflan.grad(m=mc,mutations=mut,fitness=r,death=death,model=model,dalpha=FALSE,drho=TRUE)
       res <- p$dQ_dr/p$Q
       -sum(res)
     }
@@ -1082,7 +1131,7 @@ FitnessP0Optimization <- function(mc,fn=NULL,model=c("LD","H"),mut,death=0,winso
     
     ll <- function(r){
       p <- mapply(function(x,y){
-	    log(dflan(x,mut*y,r,death,model))
+	    log(dflan(m=x,mutations=mut*y,fitness=r,death=death,model=model))
 	  },mc,fn)
       -sum(p)
     }
@@ -1090,7 +1139,7 @@ FitnessP0Optimization <- function(mc,fn=NULL,model=c("LD","H"),mut,death=0,winso
     # gradient of log-likelihood of the sample
     dll <- function(r){
       res <- mapply(function(x,y){
-	      p<-dflan.grad(x,mut*y,r,death,model,dalpha=FALSE,drho=TRUE)      
+	      p<-dflan.grad(m=x,mutations=mut*y,fitness=r,death=death,model=model,dalpha=FALSE,drho=TRUE)      
 	      p$dQ_dr/p$Q
 	    },mc,fn)
       -sum(res)
@@ -1098,18 +1147,22 @@ FitnessP0Optimization <- function(mc,fn=NULL,model=c("LD","H"),mut,death=0,winso
   
   }
     
-  r.est <- FitnessGFEstimation(mc,death,model)
-  if(!r.est$succeeds) warning("Initialization of 'fitness' with 'GF'-method has failed.")
-  r.est <- r.est$fitness
   
-  lower = 0.05*r.est
-  upper = 20*r.est
+  lower = 0.1*r.est
+  upper = 10*r.est
   
-  r.est <- lbfgsb3(prm=r.est,fn=ll,gr=dll,lower = lower,upper=upper,control=list(trace=0,iprint=-1))$prm
+  if(est$succeeds) {
+    lower <- 10*r.est ; 
+    upper <- 500*r.est
+  }
   
-  if(is.null(fn)) dldd <- dflan.grad(mc,mut,r.est,death,model,dalpha=FALSE,drho=TRUE)
+  est <- lbfgsb3(prm=r.est,fn=ll,gr=dll,lower = lower,upper=upper,control=list(trace=0,iprint=-1))
+  r.est <- est$prm
+  
+  if(is.null(fn)) dldd <- dflan.grad(m=mc,mutations=mut,fitness=r.est,death=death,model=model,dalpha=FALSE,drho=TRUE)
+  
   else dldd <- mapply(function(x,y){
-		  dflan.grad(x,mut*y,r.est,death,model,dalpha=FALSE,drho=TRUE)
+		  dflan.grad(m=x,mutations=mut*y,fitness=r.est,death=death,model=model,dalpha=FALSE,drho=TRUE)
 	       },mc,fn)
   
   I <- sum((dldd$dQ_dr)^2/(dldd$Q)^2)
@@ -1120,13 +1173,13 @@ FitnessP0Optimization <- function(mc,fn=NULL,model=c("LD","H"),mut,death=0,winso
 
 	      #//////////////////////////////////GF method//////////////////////////////////#
 
-MutationGFEstimation <- function(mc,mfn=NULL,cvfn=NULL,fitness=1,death=0,model=c("LD","H")){
+MutationGFEstimation <- function(mc,mfn=NULL,cvfn=NULL,fitness=1,death=0.,model=c("LD","H")){
 
   if(missing(model)) model <- "LD"
   model <- match.arg(model)
 
   q <- .tunings$q
-  b <- quantile(mc,q,names=F)+1           # scaling factor
+  b <- quantile(mc,q,names=FALSE)+1           # scaling factor
   
   Mutmodel= new(FlanMutMod,list(
     mc=mc,
@@ -1140,14 +1193,14 @@ MutationGFEstimation <- function(mc,mfn=NULL,cvfn=NULL,fitness=1,death=0,model=c
   
 }
 
-FitnessGFEstimation <- function(mc,death=0,model=c("LD","H")){
+FitnessGFEstimation <- function(mc,death=0.,model=c("LD","H")){
 
   if(missing(model)) model <- "LD"
   model <- match.arg(model)
 
   tu <- .tunings
   q <- tu$q
-  b <- quantile(mc,q,names=F)+1           # scaling factor
+  b <- quantile(mc,q,names=FALSE)+1           # scaling factor
   z1 <- tu$z1                            # lower value
   z2 <- tu$z2                            # higher value
   z1<-z1^(1/b); z2<-z2^(1/b) ;            # rescale variables 
@@ -1156,10 +1209,13 @@ FitnessGFEstimation <- function(mc,death=0,model=c("LD","H")){
   g2 <- mean(z2^mc)                   # empirical generating function at z2
   y <- log(g1)/log(g2)                   # get ratio of logs
   
-  if(model == "LD") clone=new(FlanExpClone,death)
-  if(model == "H") clone=new(FlanDirClone,death)
+  if(model == "LD") clone=new(FlanExpClone,list(death=death))
+  if(model == "H") clone=new(FlanDirClone,list(death=death))
   
-  f <- function(r){((1-clone$pgf(r,z1))/(1-clone$pgf(r,z2)))-y}
+  f <- function(r){
+    PGF <- clone$pgf2(r,c(z1,z2))
+    ((1-PGF[1])/(1-PGF[2]))-y
+  }
 		  
   binf <- 0.01
   bsup <- 100
@@ -1175,14 +1231,14 @@ FitnessGFEstimation <- function(mc,death=0,model=c("LD","H")){
 }
 
 
-MutationFitnessGFEstimation <- function(mc,mfn=NULL,cvfn=NULL,death=0,model=c("LD","H")){
+MutationFitnessGFEstimation <- function(mc,mfn=NULL,cvfn=NULL,death=0.,model=c("LD","H")){
 
   if(missing(model)) model <- "LD"
   model <- match.arg(model)
 
   tu <- .tunings
   q <- tu$q
-  b <- quantile(mc,q,names=F)+1           # scaling factor
+  b <- quantile(mc,q,names=FALSE)+1           # scaling factor
   z1 <- tu$z1                            # lower value
   z2 <- tu$z2                            # higher value
   z3 <- tu$z3
@@ -1223,7 +1279,7 @@ MutationFitnessGFEstimation <- function(mc,mfn=NULL,cvfn=NULL,death=0,model=c("L
    
 }
 
-dclone <- function(m,fitness=1,death=0,model=c("LD","H")){
+dclone <- function(m,fitness=1,death=0.,model=c("LD","H")){
 
   if(sum(m < 0) > 0 | sum(trunc(m) != m) > 0){
     stop("'m' must be a vector of positive integers")
@@ -1239,8 +1295,8 @@ dclone <- function(m,fitness=1,death=0,model=c("LD","H")){
   model <- match.arg(model)
 
   
-  if(model=="LD") clone <- new(FlanExpClone,fitness,death)
-  if(model == "H") clone <- new(FlanDirClone,fitness,death)
+  if(model=="LD") clone <- new(FlanExpClone,list(fitness=fitness,death=death))
+  if(model == "H") clone <- new(FlanDirClone,list(fitness=fitness,death=death))
   
   
   M <- max(m)
@@ -1252,7 +1308,7 @@ dclone <- function(m,fitness=1,death=0,model=c("LD","H")){
 
 
 
-dflan.grad <- function(m,mutations=1,fitness=1,death=0,model=c("LD","H"),dalpha=TRUE,drho=FALSE){
+dflan.grad <- function(m,mutations=1,fitness=1,death=0.,model=c("LD","H"),dalpha=TRUE,drho=FALSE){
 
   if(sum(m < 0) > 0 | sum(trunc(m) != m) > 0){
     stop("'m' must be a vector of positive integers")
@@ -1295,7 +1351,7 @@ dflan.grad <- function(m,mutations=1,fitness=1,death=0,model=c("LD","H"),dalpha=
 }
 
 
-deduce.dflan <- function(m,mutations=1,fitness=1,death=0,model=c("LD","H"),clone){
+deduce.dflan <- function(m,mutations=1,fitness=1,death=0.,model=c("LD","H"),clone){
 
   if(sum(m < 0) > 0 | sum(trunc(m) != m) > 0){
     stop("'m' must be a vector of positive integers")
@@ -1328,7 +1384,7 @@ deduce.dflan <- function(m,mutations=1,fitness=1,death=0,model=c("LD","H"),clone
   output[m+1]
 }
 
-deduce.dflanda <- function(m,mutations=1,fitness=1,death=0,model=c("LD","H"),clone){
+deduce.dflanda <- function(m,mutations=1,fitness=1,death=0.,model=c("LD","H"),clone){
 
   if(sum(m < 0) > 0 | sum(trunc(m) != m) > 0){
     stop("'m' must be a vector of positive integers")
@@ -1375,72 +1431,72 @@ flantest <- function(Tstat,parameter,estimate,p.value,conf.int,estimates,null.va
   obj <- list(Tstat=Tstat,estimate=estimate,parameter=parameter,conf.int=conf.int,p.value=p.value,
   null.value=null.value,alternative=alternative,data.name=data.name,model=model,method=method,nsamples=nsamples)
   class(obj) <- "flantest"
-  return(obj)
+  obj
 }
 
 # Print function for flantest objects, inspired from print function for htest objects
-print.flantest <- function(object){
+print.flantest <- function(x,...){
   digits <- getOption("digits")
   prefix <- "\t"
   cat("\n")
-  if(object$nsamples == 2){
-    cat(strwrap(paste("Paired ",object$method,"-test"," (",object$model," model)",sep=""), prefix=prefix), sep="\n")
+  if(x$nsamples == 2){
+    cat(strwrap(paste("Two sample ",x$method,"-test"," (",x$model," model)",sep=""), prefix=prefix), sep="\n")
   } else {
-    cat(strwrap(paste("One sample ",object$method,"-test"," (",object$model," model)",sep=""), prefix=prefix), sep="\n")
+    cat(strwrap(paste("One sample ",x$method,"-test"," (",x$model," model)",sep=""), prefix=prefix), sep="\n")
   }
   cat("\n")
   cat("------------------------------------- Data -----------------------------------\n")
 
-  if(object$nsamples == 2){
-    if(length(object$data.name) == 1){
-      cat("data:  ",object$data.name[[1]][1]," and ",object$data.name[[1]][2],"\n", sep="")
+  if(x$nsamples == 2){
+    if(length(x$data.name) == 1){
+      cat("data:  ",x$data.name[[1]][1]," and ",x$data.name[[1]][2],"\n", sep="")
     }
-    if(length(object$data.name) == 2){
-      if(length(object$data.name[[2]]) == 2){
-	cat("data:  ",object$data.name[[1]][1]," with ",object$data.name[[2]][1],
-	" and ",object$data.name[[1]][2]," with ",object$data.name[[2]][2],"\n", sep="")
+    if(length(x$data.name) == 2){
+      if(length(x$data.name[[2]]) == 2){
+	cat("data:  ",x$data.name[[1]][1]," with ",x$data.name[[2]][1],
+	" and ",x$data.name[[1]][2]," with ",x$data.name[[2]][2],"\n", sep="")
       } else {
-	cat("data:  ",object$data.name[[1]][1]," with ",object$data.name[[2]][1],
-	" and ",object$data.name[[1]][2],"\n", sep="")
+	cat("data:  ",x$data.name[[1]][1]," with ",x$data.name[[2]][1],
+	" and ",x$data.name[[1]][2],"\n", sep="")
       }
     }
   }
-  if(object$nsamples == 1){
-    if(length(object$data.name) == 1){
-      cat("data:  ",object$data.name[[1]][1],"\n", sep="")
+  if(x$nsamples == 1){
+    if(length(x$data.name) == 1){
+      cat("data:  ",x$data.name[[1]][1],"\n", sep="")
     }
-    if(length(object$data.name) == 2){
-      cat("data:  ",object$data.name[[1]][1]," with ",object$data.name[[2]][1],"\n", sep="")
+    if(length(x$data.name) == 2){
+      cat("data:  ",x$data.name[[1]][1]," with ",x$data.name[[2]][1],"\n", sep="")
     }
   }
   
   out <- character()
 
-  if(!is.null(object$null.value)){
-    if(length(object$null.value) == 1){
-      if(!is.null(object$parameter)){
-	if(object$nsamples == 2){
-	  Nparam <- dim(object$param)[2]
+  if(!is.null(x$null.value)){
+    if(length(x$null.value) == 1){
+      if(!is.null(x$parameter)){
+	if(x$nsamples == 2){
+	  Nparam <- dim(x$param)[2]
 	  cat("Sample 1 parameters : ")
 	  for(i in 1:Nparam){
-	    out <- c(out,paste(colnames(object$parameter)[i], "=", format(signif(object$parameter[1,i], 
+	    out <- c(out,paste(colnames(x$parameter)[i], "=", format(signif(x$parameter[1,i], 
 	      max(1, digits - 2)))))
 	  }
 	  cat(strwrap(paste(out, collapse=", ")), sep="\n")
 	  out <- character()
 	  cat("Sample 2 parameters : ")
 	  for(i in 1:Nparam){
-	    out <- c(out,paste(colnames(object$parameter)[i], "=", format(signif(object$parameter[2,i], 
+	    out <- c(out,paste(colnames(x$parameter)[i], "=", format(signif(x$parameter[2,i], 
 	      max(1, digits - 2)))))
 	  }
 	} else {
-	  Nparam <- length(object$parameter)
+	  Nparam <- length(x$parameter)
 	  for(i in 1:Nparam){
-	    if(names(object$parameter[i])=="mfn"){
-	      out <- c(out,paste(names(object$parameter[i]), "=", format(object$parameter[i], 
+	    if(names(x$parameter[i])=="mfn"){
+	      out <- c(out,paste(names(x$parameter[i]), "=", format(x$parameter[i], 
 	      scientific=TRUE,digit=5)))
 	    } else {
-	      out <- c(out,paste(names(object$parameter[i]), "=", format(signif(object$parameter[i], 
+	      out <- c(out,paste(names(x$parameter[i]), "=", format(signif(x$parameter[i], 
 	      max(1, digits - 2)))))
 	    }
 	  }
@@ -1448,124 +1504,329 @@ print.flantest <- function(object){
       }
       cat(strwrap(paste(out, collapse=", ")), sep="\n")
       cat("---------------------------------- Statistics --------------------------------\n")
-      if(!is.null(object$Tstat)){
-	cat("Tstat =", format(signif(object$Tstat, 
+      if(!is.null(x$Tstat)){
+	cat("Tstat =", format(signif(x$Tstat, 
 	  max(1, digits - 2))),"\n")
       }
-      if (!is.null(object$p.value)) {
-	fp <- format.pval(object$p.value, digits= max(1, digits - 
+      if (!is.null(x$p.value)) {
+	fp <- format.pval(x$p.value, digits= max(1, digits - 
 	    3))
-	cat("p-value for",names(object$null.value[1]), if (substr(fp, 1, 1) == 
+	cat("p-value for",names(x$null.value[1]), if (substr(fp, 1, 1) == 
 	  "<") fp else paste("=", fp),"\n")
       }
       
-      if (!is.null(object$alternative)) {
+      if (!is.null(x$alternative)) {
 	cat("Alternative hypothesis: ")
-	alt.char <- switch(object$alternative, two.sided="not equal to", 
+	alt.char <- switch(x$alternative, two.sided="not equal to", 
 		less="less than", greater="greater than")
-	cat("true ", names(object$null.value), " is ", alt.char, 
-	  " ", object$null.value, "\n", sep="")
+	cat("true ", names(x$null.value), " is ", alt.char, 
+	  " ", x$null.value, "\n", sep="")
       }
       
-      if (!is.null(object$conf.int)) {
-	cat(format(100 * attr(object$conf.int, "conf.level")), " percent confidence interval:\n",
-	paste(format(object$conf.int),collapse="  "),
+      if (!is.null(x$conf.int)) {
+	cat(format(100 * attr(x$conf.int, "conf.level")), " percent confidence interval:\n",
+	paste(format(x$conf.int),collapse="  "),
 	"\n")
       }
-      if (!is.null(object$estimate)) {
-	if(object$nsamples == 1){
+      if (!is.null(x$estimate)) {
+	if(x$nsamples == 1){
 	  cat("Sample estimates : \n")
-	  print(object$estimate)
+	  print(x$estimate)
 	}
-	if(object$nsamples == 2){
+	if(x$nsamples == 2){
 	  cat("Sample 1 estimates : \n")
-	  print(object$estimate[1,])
+	  print(x$estimate[1,])
 	  cat("Sample 2 estimates : \n")
-	  print(object$estimate[2,])
+	  print(x$estimate[2,])
 	}
       }
-    } else if(length(object$null.value)==2){
+    } else if(length(x$null.value)==2){
       
-      if(!is.null(object$parameter)){
-	if(object$nsamples == 2){
+      if(!is.null(x$parameter)){
+	if(x$nsamples == 2){
 	  cat("Sample 1 parameters : ")
-	  Nparam <- dim(object$param)[2]
+	  Nparam <- dim(x$param)[2]
 	  for(i in 1:Nparam){
-	    out <- c(out,paste(colnames(object$parameter)[i], "=", format(signif(object$parameter[1,i], 
+	    out <- c(out,paste(colnames(x$parameter)[i], "=", format(signif(x$parameter[1,i], 
 	      max(1, digits - 2)))))
 	  }
 	  cat(strwrap(paste(out, collapse=", ")), sep="\n")
 	  out <- character()
 	  cat("Sample 2 parameters : ")
 	  for(i in 1:Nparam){
-	    if(colnames(object$parameter)[i] == "mfn"){
-	      out <- c(out,paste(colnames(object$parameter)[i], "=", format(object$parameter[2,i], 
+	    if(colnames(x$parameter)[i] == "mfn"){
+	      out <- c(out,paste(colnames(x$parameter)[i], "=", format(x$parameter[2,i], 
 	      scientific=TRUE,digit=5)))
 	    } else {
-	      out <- c(out,paste(colnames(object$parameter)[i], "=", format(signif(object$parameter[2,i], 
+	      out <- c(out,paste(colnames(x$parameter)[i], "=", format(signif(x$parameter[2,i], 
 	      max(1, digits - 2)))))
 	    }
 	  }
 	} 
-	if(object$nsamples == 1){
+	if(x$nsamples == 1){
 	  cat("Sample parameters : ")
-	  Nparam <- length(object$parameter)
+	  Nparam <- length(x$parameter)
 
 	  for(i in 1:Nparam){
-	    out <- c(out,paste(names(object$parameter[i]), "=", format(signif(object$parameter[i], 
+	    out <- c(out,paste(names(x$parameter[i]), "=", format(signif(x$parameter[i], 
 	      max(1, digits - 2)))))
 	  }
 	}
       }
       cat(strwrap(paste(out, collapse=", ")), sep="\n")
       cat("---------------------------------- Statistics --------------------------------\n")
-      if(!is.null(object$Tstat)){
-	cat("Tstat = (",format(signif(object$Tstat[1], 
-	  max(1, digits - 2)))," , ",format(signif(object$Tstat[2],
+      if(!is.null(x$Tstat)){
+	cat("Tstat = (",format(signif(x$Tstat[1], 
+	  max(1, digits - 2)))," , ",format(signif(x$Tstat[2],
 	  max(1, digits - 2))),")","\n",sep="")
       }
-      if (!is.null(object$p.value)) {
-	fp1 <- format.pval(object$p.value[1], digits=max(1, digits - 
+      if (!is.null(x$p.value)) {
+	fp1 <- format.pval(x$p.value[1], digits=max(1, digits - 
 	    3))
-	fp2 <- format.pval(object$p.value[2], digits=max(1, digits - 
+	fp2 <- format.pval(x$p.value[2], digits=max(1, digits - 
 	    3))
-	cat("p-value for",names(object$null.value[1]), if (substr(fp1, 1, 1) == 
-	  "<") fp1 else paste("=", fp1),"\np-value for",names(object$null.value[2]),if (substr(fp2, 1, 1) == 
+	cat("p-value for",names(x$null.value[1]), if (substr(fp1, 1, 1) == 
+	  "<") fp1 else paste("=", fp1),"\np-value for",names(x$null.value[2]),if (substr(fp2, 1, 1) == 
 	  "<") fp2 else paste("=", fp2),"\n")
       }
-      if (!is.null(object$alternative)) {
+      if (!is.null(x$alternative)) {
 	cat("Alternative hypotheses: ")
-	alt.char1 <- switch(object$alternative[1], two.sided="not equal to", 
+	alt.char1 <- switch(x$alternative[1], two.sided="not equal to", 
 		less="less than", greater="greater than")
-	alt.char2 <- switch(object$alternative[2], two.sided="not equal to", 
+	alt.char2 <- switch(x$alternative[2], two.sided="not equal to", 
 		less="less than", greater="greater than")
-	cat("true ", names(object$null.value[1]), " is ", alt.char1, 
-	  " ", object$null.value[1], "\n", sep="")
+	cat("true ", names(x$null.value[1]), " is ", alt.char1, 
+	  " ", x$null.value[1], "\n", sep="")
 	cat("                        ")
-	cat("true ", names(object$null.value[2]), " is ", alt.char2, 
-	  " ", object$null.value[2], "\n", sep="")
+	cat("true ", names(x$null.value[2]), " is ", alt.char2, 
+	  " ", x$null.value[2], "\n", sep="")
       }
-      if (!is.null(object$conf.int)) {
-	cat(format(100 * attr(object$conf.int, "conf.level")), " percent confidence interval for ",names(object$null.value[1]),": \n", 
-	  paste(format(object$conf.int[,1]),collapse="   "),
+      if (!is.null(x$conf.int)) {
+	cat(format(100 * attr(x$conf.int, "conf.level")), " percent confidence interval for ",names(x$null.value[1]),": \n", 
+	  paste(format(x$conf.int[,1]),collapse="   "),
 	  "\n",
-	  format(100 * attr(object$conf.int, "conf.level")), " percent confidence interval for ",names(object$null.value[2]),": \n",
-	  paste(format(object$conf.int[,2]),collapse="   "),
+	  format(100 * attr(x$conf.int, "conf.level")), " percent confidence interval for ",names(x$null.value[2]),": \n",
+	  paste(format(x$conf.int[,2]),collapse="   "),
 	  "\n",sep="")
       }
-      if (!is.null(object$estimate)) {
-	if(object$nsamples == 1){
+      if (!is.null(x$estimate)) {
+	if(x$nsamples == 1){
 	  cat("Sample estimates : \n")
-	  print(object$estimate[1,])
+	  print(x$estimate[1,])
 	}
-	if(object$nsamples == 2){
+	if(x$nsamples == 2){
 	  cat("Sample 1 estimates : \n")
-	  print(object$estimate[1,])
+	  print(x$estimate[1,])
 	  cat("Sample 2 estimates : \n")
-	  print(object$estimate[2,])
+	  print(x$estimate[2,])
 	}
       }
     } 
     cat("\n")
   }    
 }
+
+
+draw.clone <- function(t,mutprob=1e-2,fitness=1,death=0.,
+	     dist=list("lnorm",meanlog=-0.3795851,sdlog=0.3016223)){
+  #   Simulates a clone up to time t, represents the clone, and
+  #   returns the vector of split times.
+  #   At each division, the probability of having a mutant is mutprob.
+  #   Variable death is the probability of death of a cell. 
+  #   The division times of have distribution dist, normalized
+  #   to unit growth rate for mutant, to fitness for normal cells.
+  #   The distribution dist is given as a list of a character chain 
+  #   followed by the list of parameters. 
+  #
+  #   usage: draw.clone(5)
+  #          draw.clone(t=9,fitness=0.5,death=0.1)
+  #          draw.clone(t=3,mutprob=0.1,fitness=2,dist=dexp,death=0.2)
+  #
+  
+  
+    names(dist)[1] <- "name"
+    if(dist$name == "exp"){
+      names(dist)[2] <- "rate"
+    } else if(dist$name == "dirac"){
+      names(dist)[2] <- "location"
+    } else if(dist$name == "lnorm"){
+      names(dist)[2] <- "meanlog"
+      names(dist)[3] <- "sdlog"
+    } else if(dist$name == "gamma"){
+      names(dist)[2] <- "shape"
+      names(dist)[3] <- "scale"
+    } else stop("'dist[[1]]' must be a character chain among 'exp', 'dirac', 'lnorm', 'gamma'")
+
+    
+		    # initialization
+  p <- mutprob                            # mutation probability
+  distn <- adjust.rate(dist,fitness=fitness,death=death)      # division times of normal cells
+  distm <- adjust.rate(dist,fitness=1,death=death)            # division times of mutants
+  g <- 0                                  # current generation
+  ce <- 1                                 # cells of current generation
+  mu <- FALSE                                 # mutants in current generation
+  bd <- 0                                 # birth dates of current generation
+  dt <- rdt(1,distn)                      # life times of current generation
+  de <- bd+dt                             # death dates of current generation
+  or <- 1                                 # location of cells in current generation
+  div <- {which((de<t)&                   # indices of cells dead before t
+	      (runif(length(de))>death))} # that will divide
+  de <- min(de,t)                         # truncate death dates
+  nd <- length(div)                       # number of dividing cells
+  nc <- nd                                # total number of cells
+  CE <- ce                                # all cells
+  MU <- mu                                # all mutants
+  BD <- bd                                # all birth dates
+  DE <- de                                # all death dates
+  OR <- or                                # all locations
+		    # main loop
+  while((nd>0)&&(nc<1e+4)){               # while divisions still happen  
+      g <- g+1                            # next generation
+      ce <- 2*ce[div]; ce <- c(ce,ce+1)   # cells in next generation
+	  mu <- mu[div]                   # mutants that divide
+	  mu1 <- {sample(c(TRUE,FALSE),length(div),                      
+	      replace=TRUE,prob=c(p,1-p))}# new mutants in next generation
+  # 	if (){mu1}
+	  mu1 <- mu|mu1                   # mutants in next generation
+	  mu <- c(mu1,mu)                 # all mutants in next generation
+      nd <- nd*2                          # double the number of cells
+      bd <- c(de[div],de[div])            # birth dates of daughters
+	  imu <- which(mu)                # indices of mutants
+	  nmu <- length(imu)              # number of mutants
+	  ino <- which(!mu)               # indices of normal cells
+	  nno <- length(ino)              # number of normal cells
+      dtmu <- rdt(nmu,distm)              # division times of mutants
+      dtno <- rdt(nno,distn)              # division times of normal cells
+	  dt <- rep(0,nd)                 # division times of daughters
+      dt[imu] <- dtmu                     # insert division times of mutants
+	  dt[ino] <- dtno                 # insert division times of normal cells
+      de <- bd+dt                         # death dates of daughters
+      or<-c(or[div]-2^(-g),or[div]+2^(-g))# location of daughters 
+      div <- {which((de<t)&               # indices of cells dead before t
+	      (runif(length(de))>death))} # that will divide
+      de <- mapply(min,de,rep(t,nd))      # truncate death dates
+      nd <- length(div)                   # number of dividing daughters
+      nc <- nc+nd                         # total number of cells
+      CE <- c(CE,ce)                      # stack new cells
+      MU <- c(MU,mu)                      # stack mutants
+      BD <- c(BD,bd)                      # stack birth dates
+      DE <- c(DE,de)                      # stack death dates
+      OR <- c(OR,or)                      # stack locations
+  }                                       # end while
+  if (nc > 1e+4){
+    warning("too many cells to plot")
+    }else{
+		    # treatment for graphics
+  if(mutprob == 0){colnor <- "green4"}
+  else{
+  colnor <- "green4"                      # color for normal cells
+  colmut <- "orangered"                   # color for mutants
+  }
+  nc <- length(CE)                        # number of cells
+  if (nc>1){                              # something to plot
+  OR <- sort(OR,index.return=TRUE)$ix     # order for plotting
+  CE <- CE[OR]                            # reorder cells
+  MU <- MU[OR]                            # reorder mutants
+  BD <- BD[OR]                            # reorder births
+  DE <- DE[OR]                            # reorder deaths
+  nmu <- length(which(MU))                # number of mutants
+  nno <- nc - nmu                         # number of normal
+  BDN <- BD[!MU]                          # births of normal
+  DEN <- DE[!MU]                          # deaths of normal
+  XN <- rbind(which(!MU),which(!MU))      # abscissas for vertical lines normal
+  YN <- rbind(BDN,DEN)                    # ordinates for vertical lines normal
+  nlc <- nc - length(which(DE<t))         # living cells at time t
+  nlm <- nmu - length(which((DE<t)&MU))   # living mutants at time t
+  para <- {substitute(list(               # list of parameters
+	  "mutation probability" == t1, fitness == t2, death==t3,
+	  cells == t4, mutants ==t5),    # names
+	  list(t1=p,t2=fitness,t3=death,
+	  t4=nlc,t5=nlm))}               # values
+#   if(!Lab){para = NULL}
+  name <- switch(dist[[1]],               # distribution of division times
+	  dirac="constant lifetimes",
+	  exp="exponential lifetimes",
+	  gamma="gamma lifetimes",
+	  lnorm="log-normal lifetimes")
+  {matplot(XN,YN,                         # plot vertical lines
+	  main=para,                     # add title
+	  xlim=c(1,nc),             
+	  ylim = c(t,0),                 # reverse y axis
+	  type="l",col=colnor,           # color for normal
+	  lty=rep(1,nno),                # solid lines
+	  axes=FALSE,                    # remove axes
+	  xlab=name,ylab="time")}        # axes labels
+  axis(side=2)                            # draw time axis
+  if(nmu>0){                              # if any mutant
+    BDM <- BD[MU]                        # births of mutant
+    DEM <- DE[MU]                        # deaths of mutant
+    XM <- rbind(which(MU),which(MU))     # abscissas for vertical lines mutant
+    YM <- rbind(BDM,DEM)                 # ordinates for vertical lines mutant
+    {matlines(XM,YM,                     # plot horizontal lines
+	  type="l",col=colmut,           # color for mutant
+	  lty=rep(1,nmu))}               # solid lines
+  }                                       # end if any mutants
+  div <- which((DE<t)&(!MU))              # indices dividing cells normal
+  DIN <- CE[div]                          # identities dividing cells normal
+  DLN <- 2*DIN                            # identities of left daughters
+  IO <- sort(CE,index.return=TRUE)        # numeral order of cells
+  IOx <- IO$x; IOix <- IO$ix              # get cells and order
+  indn <- which(IOx %in% DLN)             # identify left daughters normal 
+  XLN <- IOix[indn]                       # indices of left daughters normal
+  XRN <- IOix[indn+1]                     # indices of right daughters normal
+  XN <- rbind(XLN,XRN)                    # abscissas for horizontal lines
+  YN <- rbind(BD[XLN],BD[XRN])            # ordinates for horizontal lines
+  {matlines(XN,YN,                        # plot horizontal lines
+	  type="l",col=colnor,           # color normal
+	  lty=rep(1,nno))}               # solid lines
+  div <- which((DE<t)&MU)                 # indices dividing cells mutant
+  if (length(div>0)){                     # if any dividing mutant
+    DIM <- CE[div]                       # identities dividing cells mutant
+    DLM <- 2*DIM                         # identities of left daughters
+    indm <- which(IOx %in% DLM)          # identify left daughters mutant
+    XLM <- IOix[indm]                    # indices of left daughters mutant
+    XRM <- IOix[indm+1]                  # indices of right daughters mutant
+    XM <- rbind(XLM,XRM)                 # abscissas for horizontal lines
+    YM <- rbind(BD[XLM],BD[XRM])         # ordinates for horizontal lines
+    {matlines(XM,YM,                     # plot horizontal lines
+	  type="l",col=colmut,           # color mutant
+	  lty=rep(1,nmu))}               # solid lines
+  }                                       # end if any dividing mutant
+  }                                       # end if something to plot
+  }                                       # end if graphics
+#   ST <- sort(BD)                          # split times
+#   ST <- append(ST,t)                      # final instant
+#   list(ST=ST,nc=nc)                              # return birth dates
+}
+
+
+rdt <- function(n,dist){
+#   Returns a sample of size n of distribution dist.
+#   The distribution dist is given as a list of a character chain 
+#   followed by the list of parameters. 
+#
+#   usage: dist <- list("lnorm",meanlog=0,sdlog=1)
+#          rdt(100,dist)
+#          rdt(1000,goflnormBA)
+#
+switch(dist[[1]],
+    dirac={                             # constant division times
+        l <- dist$location              # location parameter
+        rep(l,n)
+          },                            # end Dirac distribution
+    exp={                               # exponential distribution
+        r <- dist$rate                  # rate parameter
+        rexp(n,rate=r)
+          },                            # end exponential distribution
+    gamma={                             # gamma distribution
+        a <- dist$shape                 # shape parameter
+        l <- dist$scale                 # scale parameter
+        rgamma(n,shape=a,scale=l)
+          },                            # end gamma distribution
+    lnorm={                             # Log Normal distribution
+        a <- dist$sdlog                 # sdlog parameter
+        l <- dist$meanlog               # meanlog parameter
+        rlnorm(n,meanlog=l,sdlog=a)
+          }                             # end log normal distribution
+)                                       # end switch
+}                                       # end function rdt
